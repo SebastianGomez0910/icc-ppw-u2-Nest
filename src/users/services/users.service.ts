@@ -1,56 +1,91 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { UserEntity } from '../entities/user.entity';
+import { User } from '../models/user.model';
 import { CreateUserDto } from '../dtos/create-user.dto';
 import { UpdateUserDto } from '../dtos/update-user.dto';
 import { PartialUpdateUserDto } from '../dtos/partial-update-user.dto';
-import { UserMapper } from '../mappers/user.mapper';
-import { User } from '../entities/user.entity';
+import { UserResponseDto } from '../dtos/user-response.dto';
 
 @Injectable()
 export class UsersService {
-  private users: User[] = [];
-  private currentId = 1;
+  constructor(
+    @InjectRepository(UserEntity)
+    private readonly userRepository: Repository<UserEntity>,
+  ) {}
 
-  findAll() {
-    return this.users.map((u) => UserMapper.toResponse(u));
+  async findAll(): Promise<UserResponseDto[]> {
+    const entities = await this.userRepository.find();
+    return entities
+      .map((e) => User.fromEntity(e))
+      .map((user) => user.toResponseDto());
   }
 
-  findOne(id: number) {
-    const user = this.users.find((u) => u.id === id);
-    if (!user) return { error: 'User not found' };
-    return UserMapper.toResponse(user);
+  async findOne(id: number): Promise<UserResponseDto> {
+    const entity = await this.userRepository.findOne({ where: { id } });
+
+    if (!entity) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+
+    return User.fromEntity(entity).toResponseDto();
   }
 
-  create(dto: CreateUserDto) {
-    const entity = UserMapper.toEntity(this.currentId++, dto);
-    this.users.push(entity);
-    return UserMapper.toResponse(entity);
+  async create(dto: CreateUserDto): Promise<UserResponseDto> {
+    const existingUser = await this.userRepository.findOne({
+      where: { email: dto.email },
+    });
+    if (existingUser) {
+      throw new BadRequestException('El emailya esta registrado');
+    }
+    const user = User.fromDto(dto);
+    const entity = user.toEntity();
+    const saved = await this.userRepository.save(entity);
+
+    return User.fromEntity(saved).toResponseDto();
   }
 
-  update(id: number, dto: UpdateUserDto) {
-    const user = this.users.find((u) => u.id === id);
-    if (!user) return { error: 'User not found' };
+  async update(id: number, dto: UpdateUserDto): Promise<UserResponseDto> {
+    const entity = await this.userRepository.findOne({ where: { id } });
 
-    user.name = dto.name;
-    user.email = dto.email;
+    if (!entity) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
 
-    return UserMapper.toResponse(user);
+    const updated = User.fromEntity(entity).update(dto).toEntity();
+
+    const saved = await this.userRepository.save(updated);
+
+    return User.fromEntity(saved).toResponseDto();
   }
 
-  partialUpdate(id: number, dto: PartialUpdateUserDto) {
-    const user = this.users.find((u) => u.id === id);
-    if (!user) return { error: 'User not found' };
+  async partialUpdate(
+    id: number,
+    dto: PartialUpdateUserDto,
+  ): Promise<UserResponseDto> {
+    const entity = await this.userRepository.findOne({ where: { id } });
 
-    if (dto.name !== undefined) user.name = dto.name;
-    if (dto.email !== undefined) user.email = dto.email;
+    if (!entity) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
 
-    return UserMapper.toResponse(user);
+    const updated = User.fromEntity(entity).partialUpdate(dto).toEntity();
+
+    const saved = await this.userRepository.save(updated);
+
+    return User.fromEntity(saved).toResponseDto();
   }
 
-  delete(id: number) {
-    const exists = this.users.some((u) => u.id === id);
-    if (!exists) return { error: 'User not found' };
+  async delete(id: number): Promise<void> {
+    const result = await this.userRepository.delete(id);
 
-    this.users = this.users.filter((u) => u.id !== id);
-    return { message: 'Deleted successfully' };
+    if (result.affected === 0) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
   }
 }

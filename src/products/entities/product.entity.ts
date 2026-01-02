@@ -1,13 +1,16 @@
-export class Product {
-  id: number;
-  name: string;
-  price: number;
-  createdAt: Date;
+import { BaseEntity } from 'src/core/entities/base.entity';
+import { Column, Entity } from 'typeorm';
 
-  constructor(id: number, name: string, price: number) {
-    this.id = id;
-    this.name = name;
-    this.price = price;
-    this.createdAt = new Date();
-  }
+@Entity('products')
+export class ProductEntity extends BaseEntity {
+  @Column({ type: 'varchar', length: 200 })
+  name: string;
+  @Column({ type: 'text' })
+  descripcion: string;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  precio: number;
+
+  @Column({ type: 'int' })
+  stock: number;
 }

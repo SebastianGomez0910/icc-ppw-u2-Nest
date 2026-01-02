@@ -1,56 +1,79 @@
-import { Injectable } from '@nestjs/common';
-import { Product } from '../entities/product.entity';
-import { ProductMapper } from '../mappers/product.mapper';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+
+import { ProductEntity } from '../entities/product.entity';
+import { Product } from '../models/product.model';
 import { CreateProductDto } from '../dtos/create-product.dto';
 import { UpdateProductDto } from '../dtos/update-product.dto';
+import { ProductResponseDto } from '../dtos/product-response.dto';
 import { PartialUpdateProductDto } from '../dtos/partial-update-product.dto';
+import { ConflictException } from 'src/exceptions/domain/conflict.exception';
 
 @Injectable()
 export class ProductsService {
-  private products: Product[] = [];
-  private currentId = 1;
+  constructor(
+    @InjectRepository(ProductEntity)
+    private readonly productRepository: Repository<ProductEntity>,
+  ) {}
 
-  findAll() {
-    return this.products.map((p) => ProductMapper.toResponse(p));
+  async findAll(): Promise<ProductResponseDto[]> {
+    const entities = await this.productRepository.find();
+    return entities
+      .map((e) => Product.fromEntity(e))
+      .map((p) => p.toResponseDto());
   }
 
-  findOne(id: number) {
-    const product = this.products.find((p) => p.id === id);
-    if (!product) return { error: 'Product not found' };
-    return ProductMapper.toResponse(product);
+  async findOne(id: number): Promise<ProductResponseDto> {
+    const entity = await this.productRepository.findOne({ where: { id } });
+    if (!entity)
+      throw new NotFoundException(`Producto con id ${id} no encontrado`);
+    return Product.fromEntity(entity).toResponseDto();
   }
 
-  create(dto: CreateProductDto) {
-    const entity = ProductMapper.toEntity(this.currentId++, dto);
-    this.products.push(entity);
-    return ProductMapper.toResponse(entity);
+  async create(dto: CreateProductDto): Promise<ProductResponseDto> {
+    const existing = await this.productRepository.findOne({
+      where: { name: dto.name },
+    });
+
+    if (existing)
+      throw new ConflictException(`El producto ${dto.name} ya existe`);
+    const newProduct = Product.fromDto(dto);
+    const entity = newProduct.toEntity();
+    const savedEntity = await this.productRepository.save(entity);
+    return Product.fromEntity(savedEntity).toResponseDto();
   }
 
-  update(id: number, dto: UpdateProductDto) {
-    const product = this.products.find((p) => p.id === id);
-    if (!product) return { error: 'Product not found' };
+  async update(id: number, dto: UpdateProductDto): Promise<ProductResponseDto> {
+    const entity = await this.productRepository.findOne({ where: { id } });
+    if (!entity) throw new NotFoundException(`Product with ID ${id} not found`);
 
-    product.name = dto.name;
-    product.price = dto.price;
-
-    return ProductMapper.toResponse(product);
+    const updatedModel = Product.fromEntity(entity).update(dto);
+    const savedEntity = await this.productRepository.save(
+      updatedModel.toEntity(),
+    );
+    return Product.fromEntity(savedEntity).toResponseDto();
   }
 
-  partialUpdate(id: number, dto: PartialUpdateProductDto) {
-    const product = this.products.find((p) => p.id === id);
-    if (!product) return { error: 'Product not found' };
-
-    if (dto.name !== undefined) product.name = dto.name;
-    if (dto.price !== undefined) product.price = dto.price;
-
-    return ProductMapper.toResponse(product);
+  async delete(id: number): Promise<void> {
+    const result = await this.productRepository.delete(id);
+    if (result.affected === 0) {
+      throw new NotFoundException(`Product with ID ${id} not found`);
+    }
   }
 
-  delete(id: number) {
-    const exists = this.products.some((p) => p.id === id);
-    if (!exists) return { error: 'Product not found' };
+  async partialUpdate(
+    id: number,
+    dto: PartialUpdateProductDto,
+  ): Promise<ProductResponseDto> {
+    const entity = await this.productRepository.findOne({ where: { id } });
+    if (!entity) throw new NotFoundException(`Product with ID ${id} not found`);
 
-    this.products = this.products.filter((p) => p.id !== id);
-    return { message: 'Deleted successfully' };
+    const updatedModel = Product.fromEntity(entity).update(dto as any);
+    const savedEntity = await this.productRepository.save(
+      updatedModel.toEntity(),
+    );
+
+    return Product.fromEntity(savedEntity).toResponseDto();
   }
 }
